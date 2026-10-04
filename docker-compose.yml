@@ -5,5 +5,13 @@ services:
       dockerfile: docker/Dockerfile
     container_name: visual-window-app
     ports:
-      - "6080:6080"
+      - "6080:6080"   # noVNC browser view of the real C window
+      - "8080:8080"   # web admin + device API
+    volumes:
+      - publisher-data:/app/data
+      - publisher-cache:/app/cache
     restart: "no"
+
+volumes:
+  publisher-data:
+  publisher-cache:

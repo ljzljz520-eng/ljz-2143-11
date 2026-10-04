@@ -8,7 +8,7 @@ NOVNC_PORT="6080"
 
 cleanup() {
   local code=$?
-  for pid in "${APP_PID:-}" "${NOVNC_PID:-}" "${VNC_PID:-}" "${WM_PID:-}" "${XVFB_PID:-}"; do
+  for pid in "${APP_PID:-}" "${PUB_PID:-}" "${NOVNC_PID:-}" "${VNC_PID:-}" "${WM_PID:-}" "${XVFB_PID:-}"; do
     if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
       kill "${pid}" 2>/dev/null || true
       wait "${pid}" 2>/dev/null || true
@@ -63,6 +63,16 @@ else
   websockify --web=/usr/share/novnc/ "${NOVNC_PORT}" "localhost:${VNC_PORT}" >/tmp/novnc.log 2>&1 &
 fi
 NOVNC_PID=$!
+
+# Background resource publisher (web admin + API + SQLite).
+python3 -m server --host 0.0.0.0 --port 8080 \
+    --db /app/data/publisher.db --data-dir /app/data \
+    >/tmp/publisher.log 2>&1 &
+PUB_PID=$!
+
+export BG_SERVER_URL="${BG_SERVER_URL:-http://127.0.0.1:8080}"
+export BG_CACHE_DIR="${BG_CACHE_DIR:-/app/cache}"
+export BG_DEVICE_NAME="${BG_DEVICE_NAME:-c-window-01}"
 
 ./visual-window-app &
 APP_PID=$!

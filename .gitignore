@@ -23,3 +23,15 @@ __pycache__/
 *.log
 .env
 .env.*
+
+# C build artifacts
+visual-window-app
+tests-unit
+*.o
+
+# runtime data / device cache
+/data/
+/cache/
+*.db
+*.db-wal
+*.db-shm

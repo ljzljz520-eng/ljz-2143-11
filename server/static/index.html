@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>背景资源发布管理台</title>
+<style>
+  :root {
+    --bg: #0f1420; --panel: #18202e; --line: #273142;
+    --fg: #e6ebf2; --muted: #93a0b3; --accent: #5aa9ff;
+    --ok: #3ecf8e; --warn: #f0b429; --err: #ef5b5b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.5 -apple-system, "Segoe UI", "Noto Sans CJK SC",
+         "PingFang SC", sans-serif; }
+  header { padding: 16px 24px; border-bottom: 1px solid var(--line);
+           display: flex; align-items: baseline; gap: 16px; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .policy { color: var(--muted); font-size: 12px; }
+  main { display: grid; grid-template-columns: 420px 1fr; gap: 16px;
+         padding: 16px 24px; }
+  .panel { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 14px; margin: 0 0 12px; color: var(--accent); }
+  label { display: block; font-size: 12px; color: var(--muted);
+          margin: 10px 0 4px; }
+  input[type=text], input[type=number], select {
+    width: 100%; padding: 8px; border-radius: 6px;
+    border: 1px solid var(--line); background: #0f1622; color: var(--fg); }
+  input[type=file] { width: 100%; color: var(--muted); }
+  button { margin-top: 12px; padding: 8px 14px; border-radius: 6px;
+           border: 1px solid var(--accent); background: var(--accent);
+           color: #08101d; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); }
+  button.danger { border-color: var(--err); color: var(--err);
+                  background: transparent; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .preview-box { margin-top: 12px; text-align: center;
+                 background: #0b101a; border: 1px dashed var(--line);
+                 border-radius: 8px; padding: 10px; min-height: 80px; }
+  .preview-box img { max-width: 100%; border-radius: 4px; }
+  .kv { display: grid; grid-template-columns: 130px 1fr; gap: 2px 8px;
+        font-size: 12px; margin-top: 10px; }
+  .kv .k { color: var(--muted); }
+  .alert { padding: 8px 10px; border-radius: 6px; margin-top: 10px;
+           font-size: 12px; white-space: pre-wrap; }
+  .alert.err { background: rgba(239,91,91,.12); color: var(--err);
+               border: 1px solid rgba(239,91,91,.4); }
+  .alert.ok { background: rgba(62,207,142,.12); color: var(--ok);
+              border: 1px solid rgba(62,207,142,.4); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px;
+           border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px;
+          font-size: 11px; border: 1px solid var(--line); }
+  .pill.showing, .pill.ready, .pill.switch_pending { color: var(--ok);
+          border-color: rgba(62,207,142,.5); }
+  .pill.fetching, .pill.pending { color: var(--warn);
+          border-color: rgba(240,180,41,.5); }
+  .pill.error { color: var(--err); border-color: rgba(239,91,91,.5); }
+  .pill.revoked, .pill.obsolete, .pill.unauthorized { color: var(--muted); }
+  .versions { font-variant-numeric: tabular-nums; }
+  .want { color: var(--accent); font-weight: 600; }
+  .got { color: var(--ok); font-weight: 600; }
+  .stale { color: var(--warn); }
+  .none { color: var(--muted); }
+  .muted { color: var(--muted); font-size: 12px; }
+  code { background: #0b101a; padding: 1px 5px; border-radius: 4px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>背景资源发布管理台</h1>
+  <span class="policy">
+    解码策略：
+    <b>终端解码（默认，保留原件 original）</b> /
+    服务端统一转码 PNG（transcoded） ·
+    扩展名不参与解码判定，以 magic byte + 像素预算为准
+  </span>
+</header>
+
+<main>
+  <section>
+    <div class="panel">
+      <h2>① 上传并创建资源修订</h2>
+      <form id="upload-form">
+        <label>图片文件（扩展名可任意伪造，将检查真实格式）</label>
+        <input type="file" id="file" name="file" required />
+        <label>解码策略</label>
+        <select name="policy" id="policy">
+          <option value="terminal">终端解码（保留原件；不支持时回退转码 PNG）</option>
+          <option value="server">服务端统一转码 PNG（全设备格式一致）</option>
+        </select>
+        <label>下发下载延迟（仅验收测试用，毫秒，0=关闭）</label>
+        <input type="number" id="delay_ms" name="delay_ms" value="0"
+               min="0" max="30000" />
+        <button type="submit">上传 · 嗅探 · 预算校验 · 预览</button>
+      </form>
+      <div id="upload-alert"></div>
+      <div class="preview-box" id="preview-box">
+        <span class="muted">上传后此处显示<b>服务端实际解码</b>的预览（不是浏览器按扩展名渲染）</span>
+      </div>
+      <div class="kv" id="upload-kv"></div>
+      <div class="muted" style="margin-top:8px">
+        预算：像素 ≤ <span id="budget-pixels"></span>，
+        单边 ≤ <span id="budget-dim"></span>，
+        压缩后 ≤ <span id="budget-bytes"></span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>② 资源修订与撤销</h2>
+      <table>
+        <thead><tr><th>修订</th><th>真实格式</th><th>尺寸</th>
+          <th>策略/来源</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody id="revisions-body"></tbody>
+      </table>
+      <p class="muted">
+        上传成功即创建修订并对所有已授权设备生成下发记录（pending）。
+        原件始终保留（<code>*-original.*</code>），
+        转码产物另存（<code>*.png</code>），来源在终端上报为
+        original / transcoded / cache。
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="panel">
+      <h2>③ 设备授权与版本对比（服务端期望 vs 终端实际）</h2>
+      <table>
+        <thead><tr><th>设备</th><th>授权</th><th>能力</th>
+          <th class="versions">服务端期望</th>
+          <th class="versions">终端实际</th>
+          <th>生命周期 / 错误</th><th>最近在线</th></tr></thead>
+        <tbody id="devices-body"></tbody>
+      </table>
+      <p class="muted">
+        文字层独立于背景资源：终端在“没有可用图片 / 资源错误 / 撤销”时，
+        业务状态面板照常显示，绝不为一张坏图清空整屏状态。
+      </p>
+    </div>
+
+    <div class="panel">
+      <h2>④ 下发状态明细 & 事件</h2>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+        <div>
+          <table>
+            <thead><tr><th>设备</th><th>修订</th><th>状态</th>
+              <th>错误码</th></tr></thead>
+            <tbody id="delivery-body"></tbody>
+          </table>
+        </div>
+        <div>
+          <table>
+            <thead><tr><th>时间</th><th>设备</th><th>事件</th>
+              <th>详情</th></tr></thead>
+            <tbody id="events-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtBytes = (n) => n >= 1048576
+  ? (n / 1048576).toFixed(2) + " MiB" : Math.round(n / 1024) + " KiB";
+const fmtTime = (t) => t ? new Date(t * 1000).toLocaleTimeString() : "-";
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, opts);
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+function showAlert(where, kind, text) {
+  where.innerHTML = text
+    ? `<div class="alert ${kind}">${esc(text)}</div>` : "";
+}
+
+// ---- upload -------------------------------------------------------------
+$("upload-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const alertBox = $("upload-alert");
+  showAlert(alertBox, "ok", "上传中，服务端正在按真实字节解码…");
+  $("preview-box").innerHTML =
+    '<span class="muted">解码中…</span>';
+  const fd = new FormData();
+  const file = $("file").files[0];
+  if (!file) { showAlert(alertBox, "err", "请选择文件"); return; }
+  fd.append("file", file);
+  fd.append("policy", $("policy").value);
+  fd.append("delay_ms", $("delay_ms").value || "0");
+
+  const { ok, data } = await api("/api/resources", {
+    method: "POST", body: fd
+  });
+  if (!ok) {
+    // 错误必须区分：下载不全 / 内容不支持
+    const code = data.error === "download_incomplete"
+      ? "下载不完整 / 头被截断"
+      : data.error === "content_unsupported"
+        ? "内容不支持（真实格式或像素/解码预算）" : data.error;
+    showAlert(alertBox, "err",
+      `创建修订被拒绝 [${esc(code)}]\n${esc(data.message || "")}`);
+    $("preview-box").innerHTML =
+      '<span class="muted">无解码结果（内容未被接受）</span>';
+    $("upload-kv").innerHTML = "";
+    return;
+  }
+  showAlert(alertBox, "ok",
+    `已创建修订 ${data.revision_id} 并对 ${data.targets.length} ` +
+    `台授权设备下发（pending）`);
+  $("preview-box").innerHTML =
+    `<img alt="decoded preview" src="${data.preview_png_data_url}" />`;
+  const ext = file.name.split(".").pop();
+  const extOk = ext.toLowerCase() === data.sniffed_format ||
+    (ext.toLowerCase() === "jpg" && data.sniffed_format === "jpeg");
+  $("upload-kv").innerHTML = `
+    <span class="k">修订号</span><span>${esc(data.revision_id)}</span>
+    <span class="k">上传文件名</span><span>${esc(file.name)}</span>
+    <span class="k">声明扩展名</span><span>${esc(ext)} ${
+      extOk ? "✅ 与实际一致" : "⚠️ 与实际不符（已按实际格式处理）"}</span>
+    <span class="k">嗅探真实格式</span><span>${esc(data.sniffed_format)}</span>
+    <span class="k">解码尺寸</span><span>${data.width}×${data.height}
+      （${data.pixels.toLocaleString()} px）</span>
+    <span class="k">SHA-256</span><span style="word-break:break-all">
+      ${esc(data.sha256)}</span>
+    <span class="k">大小</span><span>${fmtBytes(data.size)}</span>
+    <span class="k">原件保留</span><span>${
+      data.original_retained ? "是（original 来源）" : "否"}</span>
+    <span class="k">服务端转码</span><span>${
+      data.transcoded_png ? "是，设备将取 PNG（transcoded 来源）"
+                          : "否，终端按自身能力取原件"}</span>`;
+  refresh();
+});
+
+// ---- revisions / devices / delivery rendering ---------------------------
+let state = null;
+
+async function refresh() {
+  const { data } = await api("/api/state");
+  state = data;
+  if (data.limits) {
+    $("budget-pixels").textContent =
+      Number(data.limits.max_pixels).toLocaleString() + " px";
+    $("budget-dim").textContent = data.limits.max_dimension + " px";
+    $("budget-bytes").textContent =
+      fmtBytes(data.limits.max_compressed_bytes);
+  }
+  renderRevisions(data);
+  renderDevices(data);
+  renderDelivery(data);
+  renderEvents(data);
+}
+
+function renderRevisions(data) {
+  const latest = data.latest_revision;
+  $("revisions-body").innerHTML = data.revisions.map(r => `
+    <tr>
+      <td><code>${esc(r.id)}</code>${
+        r.id === latest ? ' <span class="pill showing">最新</span>' : ""}
+        ${r.revoked ? ' <span class="pill revoked">已撤销</span>' : ""}
+      </td>
+      <td>${esc(r.original_format)}<div class="muted">${
+        esc(r.uploaded_name)}</div></td>
+      <td>${r.width}×${r.height}</td>
+      <td>${r.png_path
+        ? '<span class="pill">server → PNG</span>'
+        : '<span class="pill">terminal</span>'}
+        <div class="muted">原件 ${esc(r.original_path)}</div></td>
+      <td>${deliverySummaryForRevision(data, r.id)}</td>
+      <td>
+        ${r.revoked
+          ? '<span class="muted">已撤销</span>'
+          : `<button class="danger" onclick="revoke('${r.id}')">撤销</button>`}
+      </td>
+    </tr>`).join("");
+}
+
+function deliverySummaryForRevision(data, revId) {
+  const rows = data.delivery.filter(d => d.revision_id === revId);
+  if (!rows.length) return '<span class="muted">无授权设备</span>';
+  const counts = {};
+  rows.forEach(r => counts[r.state] = (counts[r.state] || 0) + 1);
+  return Object.entries(counts).map(([k, v]) =>
+    `<span class="pill ${k}">${k} ×${v}</span>`).join(" ");
+}
+
+function renderDevices(data) {
+  const latest = data.latest_revision;
+  $("devices-body").innerHTML = data.devices.map(d => {
+    // latest delivery row for this device
+    const del = data.delivery
+      .filter(x => x.device_id === d.device_id)
+      .sort((a, b) => b.updated_at - a.updated_at)[0];
+    const want = latest
+      ? `<span class="want">${esc(latest)}</span>`
+      : '<span class="none">(无)</span>';
+    let actual;
+    if (del && del.last_actual) {
+      const stale = latest && del.last_actual !== latest;
+      actual = `<span class="${stale ? "stale" : "got"}">` +
+        `${esc(del.last_actual)}${stale ? " (旧)" : ""}</span>`;
+    } else {
+      actual = '<span class="none">(尚未显示)</span>';
+    }
+    const phase = del
+      ? `<span class="pill ${del.state}">${esc(del.state)}</span>` +
+        (del.error_code
+          ? `<div class="pill error">${esc(del.error_code)}</div>` : "")
+      : '<span class="muted">-</span>';
+    return `<tr>
+      <td>${esc(d.name)}<div class="muted">${esc(d.device_id)}</div></td>
+      <td>${d.authorized
+        ? '<span class="pill showing">已授权</span>'
+        : '<span class="pill unauthorized">未授权</span>'}
+        <div><button class="ghost" onclick="toggleAuth('${d.device_id}',
+          ${d.authorized ? 0 : 1})">${d.authorized ? "取消授权" : "授权"}
+        </button></div></td>
+      <td class="muted">${esc((d.formats || []).join(", "))}</td>
+      <td class="versions">${want}</td>
+      <td class="versions">${actual}</td>
+      <td>${phase}</td>
+      <td class="muted">${fmtTime(d.last_seen)}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderDelivery(data) {
+  $("delivery-body").innerHTML = data.delivery.map(d => `
+    <tr>
+      <td class="muted">${esc(d.device_id.slice(0, 12))}</td>
+      <td><code>${esc(d.revision_id)}</code></td>
+      <td><span class="pill ${esc(d.state)}">${esc(d.state)}</span></td>
+      <td>${d.error_code
+        ? `<span class="pill error">${esc(d.error_code)}</span>`
+        : '<span class="muted">-</span>'}</td>
+    </tr>`).join("");
+}
+
+function renderEvents(data) {
+  $("events-body").innerHTML = data.events.map(e => `
+    <tr>
+      <td class="muted">${fmtTime(e.ts)}</td>
+      <td class="muted">${esc(e.device_id.slice(0, 12))}</td>
+      <td>${esc(e.kind)}</td>
+      <td class="muted">${esc(e.revision_id)} ${esc(e.detail)}</td>
+    </tr>`).join("");
+}
+
+async function revoke(id) {
+  if (!confirm(`撤销修订 ${id}？\n在线设备下一帧后释放纹理；` +
+      `离线设备重连轮询时补收撤销。`)) return;
+  const { ok, data } = await api(`/api/revisions/${id}/revoke`, {
+    method: "POST", body: "{}",
+    headers: {"Content-Type": "application/json"}
+  });
+  if (!ok) alert(data.error || "撤销失败");
+  refresh();
+}
+
+async function toggleAuth(id, authorized) {
+  await api(`/api/devices/${id}/authorization`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ authorized: !!authorized })
+  });
+  refresh();
+}
+
+refresh();
+setInterval(refresh, 1500);
+</script>
+</body>
+</html>
